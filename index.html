@@ -856,22 +856,31 @@ function fillTown(){
     sel.appendChild(o);
   }
 }
+var STREET_URLS=[
+  'https://cdn.jsdelivr.net/gh/modood/Administrative-divisions-of-China@master/dist/pcas-code.json',
+  'https://fastly.jsdelivr.net/gh/modood/Administrative-divisions-of-China@master/dist/pcas-code.json',
+  'https://gcore.jsdelivr.net/gh/modood/Administrative-divisions-of-China@master/dist/pcas-code.json',
+  'https://raw.githubusercontent.com/modood/Administrative-divisions-of-China/master/dist/pcas-code.json'
+];
 function loadStreets(){
   var sel=el('selTown');
   sel.innerHTML='';
   var o=document.createElement('option');o.value='';o.textContent='（正在加载镇/街道列表…）';
   sel.appendChild(o);
-  fetch('https://cdn.jsdelivr.net/gh/modood/Administrative-divisions-of-China@master/dist/pcas-code.json')
-    .then(function(r){return r.json();})
-    .then(function(d){
-      STREETS=d;
-      fillTown();
-    })
-    .catch(function(){
-      sel.innerHTML='';
-      o=document.createElement('option');o.value='';o.textContent='（镇/街道列表加载失败，将按区县坐标获取天气）';
-      sel.appendChild(o);
-    });
+  loadStreetsTry(0);
+}
+function loadStreetsTry(i){
+  var sel=el('selTown');
+  if(i>=STREET_URLS.length){
+    sel.innerHTML='';
+    var o=document.createElement('option');o.value='';o.textContent='（镇/街道列表加载失败，将按区县坐标获取天气）';
+    sel.appendChild(o);
+    return;
+  }
+  fetchTimeout(STREET_URLS[i],20000).then(function(d){
+    STREETS=d;
+    fillTown();
+  }).catch(function(){loadStreetsTry(i+1);});
 }
 
 /* ============ 天气获取（Open-Meteo：地理编码 + 逐小时预报） ============ */
