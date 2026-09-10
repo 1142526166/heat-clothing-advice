@@ -39,9 +39,11 @@ function setSel(doc,id,val,label){
 }
 (async function(){
   var f=document.getElementById('f');
-  var win=f.contentWindow, doc=f.contentDocument;
+  var win, doc;
   li('等待页面加载…');
   var ok=await waitFor(function(){
+    win=f.contentWindow;
+    doc=f.contentDocument;
     return doc && doc.getElementById('selProv') && doc.getElementById('selProv').options.length>5;
   }, 30000);
   if(!ok){li('<span class="fail">页面加载超时</span>');return;}
