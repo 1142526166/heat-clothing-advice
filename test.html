@@ -20,6 +20,12 @@ ul{font-size:14px;line-height:1.8;padding-left:20px;}
 <ul id="log"></ul>
 <script>
 var log=document.getElementById('log');
+window.onerror=function(msg,src,line,col){
+  var d=document.createElement('li');
+  d.innerHTML='<span class="fail">页面脚本错误: '+msg+' @'+(line||'')+':'+(col||'')+'</span>';
+  log.appendChild(d);
+  return false;
+};
 function li(html){var d=document.createElement('li');d.innerHTML=html;log.appendChild(d);}
 function wait(ms){return new Promise(function(r){setTimeout(r,ms);});}
 async function waitFor(fn,timeout){
@@ -41,9 +47,14 @@ function setSel(doc,id,val,label){
   var f=document.getElementById('f');
   var win, doc;
   li('等待页面加载…');
+  var tick=0;
   var ok=await waitFor(function(){
+    tick++;
     win=f.contentWindow;
-    doc=f.contentDocument;
+    try{doc=f.contentDocument;}catch(e){doc=null;}
+    if(tick%5===0){
+      li('调试#'+tick+': doc='+(doc?'OK':'null')+(doc&&doc.getElementById?' selProv='+(doc.getElementById('selProv')?doc.getElementById('selProv').options.length:'无'):''));
+    }
     return doc && doc.getElementById('selProv') && doc.getElementById('selProv').options.length>5;
   }, 30000);
   if(!ok){li('<span class="fail">页面加载超时</span>');return;}
