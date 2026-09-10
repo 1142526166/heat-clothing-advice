@@ -895,13 +895,23 @@ function getWeather(){
   resolveCoords(tok);
 }
 var GEO_CACHE={};
+function fetchTimeout(url,ms){
+  var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
+  var t=ctl?setTimeout(function(){ctl.abort();},ms||12000):null;
+  return fetch(url,ctl?{signal:ctl.signal}:{}).then(function(r){
+    if(t){clearTimeout(t);}
+    if(!r.ok){throw new Error('HTTP '+r.status);}
+    return r.json();
+  },function(e){if(t){clearTimeout(t);}throw e;});
+}
 function geoFetch(key,url,cb){
-  if(GEO_CACHE[key]!==undefined){cb(GEO_CACHE[key]);return;}
-  fetch(url).then(function(r){return r.json();}).then(function(g){
+  var c=GEO_CACHE[key];
+  if(c&&Date.now()-c.ts<3600000){cb(c.fs);return;}
+  fetchTimeout(url,12000).then(function(g){
     var fs=(g&&g.features)?g.features:[];
-    GEO_CACHE[key]=fs;
+    GEO_CACHE[key]={fs:fs,ts:Date.now()};
     cb(fs);
-  }).catch(function(){GEO_CACHE[key]=null;cb(null);});
+  }).catch(function(){cb(null);});
 }
 function findFeature(fs,adcode){
   var i,p;
@@ -909,10 +919,43 @@ function findFeature(fs,adcode){
   for(i=0;i<fs.length;i++){p=fs[i].properties;if(p&&String(p.adcode)===adcode){return p;}}
   return null;
 }
+function stripZoneName(n){
+  var s=String(n||'');
+  s=s.replace(/特别行政区$/,'').replace(/维吾尔自治区$/,'').replace(/壮族自治区$/,'').replace(/回族自治区$/,'').replace(/自治区$/,'').replace(/省$/,'').replace(/市$/,'');
+  return s;
+}
+function sameRegion(admin1,key){
+  if(!admin1||!key){return true;}
+  var a=String(admin1),k=String(key);
+  return a===k||a.indexOf(k)>=0||k.indexOf(a)>=0;
+}
+function buildGeoQs(){
+  var d=curDist(),pv=curProv(),cy=curCity(),qs=[],t=el('selTown'),townName='';
+  if(t&&t.value&&t.selectedIndex>=0){townName=t.options[t.selectedIndex].textContent;}
+  if(townName){qs.push(townName);}
+  if(d&&d.name){qs.push(d.name);}
+  if(cy&&d&&cy.name&&cy.name!==d.name){qs.push(d.name+' '+cy.name);}
+  var cityBase=null;
+  if(cy&&cy.name&&cy.name.indexOf('市辖区')<0&&cy.name.indexOf('省直辖')<0&&cy.name.indexOf('自治区直辖')<0&&cy.name.length>1){
+    cityBase=cy.name;
+  }else if(pv){
+    cityBase=pv.name;
+  }
+  if(cityBase){
+    var st=stripZoneName(cityBase);
+    if(st&&st!==cityBase){qs.push(st);}
+    qs.push(cityBase);
+  }
+  if(pv&&pv.name){
+    var pn=stripZoneName(pv.name);
+    if(pn&&pn!==pv.name){qs.push(pn);}
+    qs.push(pv.name);
+  }
+  return {qs:qs,region:curProv()?stripZoneName(curProv().name):''};
+}
 function resolveCoords(tok){
   var d=curDist(),pv=curProv(),cy=curCity();
-  var townName='';
-  var t=el('selTown');
+  var t=el('selTown'),townName='';
   if(t&&t.value&&t.selectedIndex>=0){townName=t.options[t.selectedIndex].textContent;}
   var base='https://geo.datav.aliyun.com/areas_v3/bound/';
   var steps=[];
@@ -923,11 +966,8 @@ function resolveCoords(tok){
   function next(){
     if(tok!==fetchToken){return;}
     if(si>=steps.length){
-      var qs=[];
-      if(townName){qs.push(townName);}
-      qs.push(d.name);
-      if(cy&&cy.name!==d.name){qs.push(d.name+' '+cy.name);}
-      tryGeocode(qs,0,tok);
+      var g=buildGeoQs();
+      tryGeocode(g.qs,0,g.region,tok,townName);
       return;
     }
     var st=steps[si++];
@@ -944,19 +984,29 @@ function resolveCoords(tok){
   }
   next();
 }
-function tryGeocode(qs,idx,tok){
+function tryGeocode(qs,idx,region,tok,townName){
   if(tok!==fetchToken){return;}
-  if(idx>=qs.length){fetchFail('未能在所选地址附近解析到坐标，请尝试改选区/县或镇/街道。',tok);return;}
-  var url='https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(qs[idx])+'&count=5&language=zh&format=json';
-  fetch(url).then(function(r){return r.json();}).then(function(d){
+  if(idx>=qs.length){
+    fetchFail('未能在所选地址附近解析到坐标：请检查网络后重试，或改选区/县后再次获取。',tok);
+    return;
+  }
+  var q=qs[idx],url='https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=8&language=zh&format=json';
+  fetchTimeout(url,12000).then(function(d){
     if(tok!==fetchToken){return;}
-    var res=(d&&d.results)?d.results:[];
-    if(!res.length){tryGeocode(qs,idx+1,tok);return;}
-    var best=pickBest(res,qs[idx]);
-    if(!best){tryGeocode(qs,idx+1,tok);return;}
-    fetchForecast(best.latitude,best.longitude,best.name,tok);
+    var res=(d&&d.results)?d.results:[],i;
+    if(region){
+      for(i=res.length-1;i>=0;i--){
+        if(!sameRegion(res[i].admin1,region)){res.splice(i,1);}
+      }
+    }
+    if(!res.length){tryGeocode(qs,idx+1,region,tok,townName);return;}
+    var best=pickBest(res,q);
+    if(!best){tryGeocode(qs,idx+1,region,tok,townName);return;}
+    var note='';
+    if(townName){note='（未找到'+townName+'及区县坐标，按「'+best.name+'」中心坐标获取天气）';}
+    fetchForecast(best.latitude,best.longitude,best.name,tok,note);
   }).catch(function(){
-    if(tok===fetchToken){tryGeocode(qs,idx+1,tok);}
+    if(tok===fetchToken){tryGeocode(qs,idx+1,region,tok,townName);}
   });
 }
 function pickBest(res,q){
@@ -967,6 +1017,7 @@ function pickBest(res,q){
     else if(it.name&&q&&it.name.indexOf(q)>=0){sc+=2;}
     else if(it.name&&q&&q.indexOf(it.name)>=0){sc+=1;}
     if(it.country_code==='CN'){sc+=1;}
+    if(it.admin1){sc+=1;}
     if(sc>bs){bs=sc;best=it;}
   }
   return best;
