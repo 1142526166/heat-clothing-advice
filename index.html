@@ -82,6 +82,12 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 .hist-list li b{color:var(--txt);}
 .hist-empty{font-size:13px;color:var(--sub);padding:14px 16px;}
 .clear-btn{display:block;width:calc(100% - 32px);margin:8px 16px 12px;border:none;background:transparent;color:var(--acc);font-size:14px;cursor:pointer;min-height:44px;border-radius:8px;}
+.h-cell{padding:12px 16px;border-top:1px solid var(--sep);}
+.h-cell:first-child{border-top:none;}
+.h-lab{font-size:12px;color:var(--sub);margin-bottom:4px;}
+.h-row2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:24px;}
+.h-val{font-size:16px;font-weight:600;}
+.h-sub{font-size:12px;color:var(--sub);margin-top:3px;}
 .share-card{text-align:center;padding:18px 16px;}
 .share-card #qrcode{display:inline-block;padding:10px;background:#fff;border-radius:10px;}
 .share-card #qrcode img,.share-card #qrcode canvas{display:block;}
@@ -189,6 +195,22 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
         </div>
         <div class="occ-note" id="occNote"></div>
         <div class="occ-note" id="heroNote" style="border-top:none;padding-top:0;"></div>
+      </div>
+    </section>
+
+    <section class="group">
+      <div class="g-title">健康贴士</div>
+      <div class="card health-card">
+        <div class="h-cell">
+          <div class="h-lab">空气质量</div>
+          <div class="h-row2"><span class="h-val" id="airVal">加载中…</span><span class="badge" id="airBadge" style="background:#34C759">--</span></div>
+          <div class="h-sub" id="maskNote"></div>
+        </div>
+        <div class="h-cell">
+          <div class="h-lab">出行装备</div>
+          <div class="h-val" id="gearText"></div>
+          <div class="h-sub" id="gearSub"></div>
+        </div>
       </div>
     </section>
   </div>
@@ -535,7 +557,7 @@ function timeLabel(s){
 function fetchForecast(lat,lon,geoName,tok,note){
   var url='https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon
     +'&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wet_bulb_temperature_2m'
-    +'&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wet_bulb_temperature_2m'
+    +'&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wet_bulb_temperature_2m,uv_index,precipitation_probability'
     +'&forecast_days=2&timezone=auto';
   fetch(url).then(function(r){return r.json();}).then(function(d){
     if(tok!==fetchToken){return;}
@@ -553,7 +575,9 @@ function fetchForecast(lat,lon,geoName,tok,note){
         AP:h.apparent_temperature[i],
         W:windDesc(h.wind_speed_10m[i],h.wind_direction_10m?h.wind_direction_10m[i]:0),
         desc:wmoDesc(h.weather_code[i]),
-        wb:h.wet_bulb_temperature_2m[i]!=null?h.wet_bulb_temperature_2m[i]:stull(h.temperature_2m[i],h.relative_humidity_2m[i])
+        wb:h.wet_bulb_temperature_2m[i]!=null?h.wet_bulb_temperature_2m[i]:stull(h.temperature_2m[i],h.relative_humidity_2m[i]),
+        uv:h.uv_index?h.uv_index[i]:null,
+        pop:h.precipitation_probability?h.precipitation_probability[i]:null
       });
     }
     if(!pts.length){fetchFail('未来24小时数据为空，请重试。',tok);return;}
@@ -576,6 +600,7 @@ function fetchForecast(lat,lon,geoName,tok,note){
     el('btnFetch').disabled=false;
     refresh();
     addHistory();
+    fetchAirQuality(lat,lon,tok);
   }).catch(function(){
     fetchFail('天气接口请求失败，请检查网络后重试。',tok);
   });
@@ -704,7 +729,80 @@ function renderResult(){
   else if(ageLabel(STATE.person.age)==='儿童'){note='儿童活动量大、散热快，注意早晚保暖与防风。';}
   el('occNote').textContent=note;
   el('heroNote').textContent=WEATHER.source+' · 建议为工程估算，请结合体感增减。';
+  var maxUv=0,maxPop=0,pi;
+  for(pi=0;pi<pts.length;pi++){
+    if(pts[pi].uv!=null&&isFinite(pts[pi].uv)&&pts[pi].uv>maxUv){maxUv=pts[pi].uv;}
+    if(pts[pi].pop!=null&&isFinite(pts[pi].pop)&&pts[pi].pop>maxPop){maxPop=pts[pi].pop;}
+  }
+  var isDemo=(WEATHER.source||'').indexOf('快照')>=0;
+  var duv=isDemo?DEMO_UV:maxUv,dpop=isDemo?DEMO_POP:maxPop;
+  var gi=gearInfo(duv,dpop);
+  el('gearText').textContent=gi.text;
+  el('gearSub').textContent=gi.sub+(isDemo?'（快照演示值）':'');
+  if(isDemo){
+    renderHealth(DEMO_AIR);
+  }else{
+    el('airVal').textContent='空气质量加载中…';
+    el('airBadge').textContent='';
+    el('airBadge').style.background='#8E8E93';
+    el('maskNote').textContent='';
+  }
   el('resultWrap').hidden=false;
+}
+var DEMO_AIR={aqi:68,pm25:33,label:'良'};
+var DEMO_UV=5.2,DEMO_POP=20;
+function airInfo(aqi){
+  if(aqi==null){return {label:'--',mask:'空气质量数据暂不可用'};}
+  if(aqi<=50){return {label:'优',mask:'无需佩戴口罩'};}
+  if(aqi<=100){return {label:'良',mask:'敏感人群可佩戴口罩'};}
+  if(aqi<=150){return {label:'轻度污染',mask:'建议佩戴口罩'};}
+  if(aqi<=200){return {label:'中度污染',mask:'建议佩戴口罩，减少户外'};}
+  if(aqi<=300){return {label:'重度污染',mask:'建议佩戴防护口罩（N95）'};}
+  return {label:'严重污染',mask:'避免户外活动，务必佩戴口罩'};
+}
+function airColor(aqi){
+  if(aqi<=50){return '#34C759';}
+  if(aqi<=100){return '#FFD60A';}
+  if(aqi<=150){return '#FF9500';}
+  if(aqi<=200){return '#FF3B30';}
+  if(aqi<=300){return '#AF52DE';}
+  return '#7B2FBE';
+}
+function gearInfo(uv,pop){
+  var s=[],sub='';
+  if(pop==null||isNaN(pop)){pop=0;}
+  if(uv==null||isNaN(uv)){uv=0;}
+  if(pop>=60){s.push('建议带雨伞');}
+  else if(pop>=40){s.push('建议备雨伞');}
+  if(uv>=8){s.push('强防晒：遮阳伞+防晒霜');}
+  else if(uv>=6){s.push('建议带遮阳伞');}
+  else if(uv>=3){sub='紫外线中等，可涂防晒';}
+  if(!s.length){s.push('无需带伞');if(!sub){sub='紫外线弱，无需防晒';}}
+  return {text:s.join(' · '),sub:'降水概率 '+pop.toFixed(0)+'% · 紫外线指数 '+uv.toFixed(1)+(sub?' · '+sub:'')};
+}
+function renderHealth(air){
+  if(!air){
+    el('airVal').textContent='AQI 暂无数据';
+    el('airBadge').textContent='--';
+    el('airBadge').style.background='#8E8E93';
+    el('maskNote').textContent='空气质量接口暂不可用';
+    return;
+  }
+  var info=airInfo(air.aqi);
+  el('airVal').textContent='AQI '+air.aqi+' · '+info.label+(air.pm25!=null?'（PM2.5 '+air.pm25.toFixed(0)+'）':'');
+  var b=el('airBadge');
+  b.textContent=info.label;
+  b.style.background=airColor(air.aqi);
+  el('maskNote').textContent=info.mask;
+}
+function fetchAirQuality(lat,lon,tok){
+  var url='https://air-quality-api.open-meteo.com/v1/air-quality?latitude='+lat+'&longitude='+lon+'&current=us_aqi,pm2_5,pm10';
+  fetchTimeout(url,15000).then(function(d){
+    if(tok!==fetchToken){return;}
+    if(d&&d.current&&d.current.us_aqi!=null){
+      renderHealth({aqi:d.current.us_aqi,pm25:d.current.pm2_5,pm10:d.current.pm10});
+    }else{renderHealth(null);}
+  }).catch(function(){if(tok===fetchToken){renderHealth(null);}});
 }
 function refresh(){
   readState();
