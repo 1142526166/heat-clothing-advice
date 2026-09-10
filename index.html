@@ -359,6 +359,7 @@ function fillTown(){
 }
 function loadStreets(){
   var sel=el('selTown');
+  try{var c=localStorage.getItem('yc_streets_v1');if(c){STREETS=JSON.parse(c);fillTown();return;}}catch(e){}
   sel.innerHTML='';
   var o=document.createElement('option');o.value='';o.textContent='（正在加载镇/街道列表…）';
   sel.appendChild(o);
@@ -374,6 +375,7 @@ function loadStreetsTry(i){
   }
   fetchTimeout(STREET_URLS[i],20000).then(function(d){
     STREETS=d;
+    try{localStorage.setItem('yc_streets_v1',JSON.stringify(d));}catch(e){}
     fillTown();
   }).catch(function(){loadStreetsTry(i+1);});
 }
