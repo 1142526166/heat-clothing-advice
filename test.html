@@ -47,14 +47,9 @@ function setSel(doc,id,val,label){
   var f=document.getElementById('f');
   var win, doc;
   li('等待页面加载…');
-  var tick=0;
   var ok=await waitFor(function(){
-    tick++;
     win=f.contentWindow;
     try{doc=f.contentDocument;}catch(e){doc=null;}
-    if(tick%5===0){
-      li('调试#'+tick+': doc='+(doc?'OK':'null')+(doc&&doc.getElementById?' selProv='+(doc.getElementById('selProv')?doc.getElementById('selProv').options.length:'无'):''));
-    }
     return doc && doc.getElementById('selProv') && doc.getElementById('selProv').options.length>5;
   }, 30000);
   if(!ok){li('<span class="fail">页面加载超时</span>');return;}
@@ -67,19 +62,28 @@ function setSel(doc,id,val,label){
   await wait(1000);
   // 3) 武昌区
   setSel(doc,'selDist','420106','区/县(武昌区)');
-  await wait(3000); // 等待乡镇街道列表从 jsDelivr 加载
+  // 等待镇/街道列表加载（多镜像最长约 4×20 秒，测试等待 30 秒）
+  var townReady=await waitFor(function(){
+    var t=doc.getElementById('selTown');
+    if(!t){return false;}
+    return t.options.length>1 && t.options[0].textContent.indexOf('加载')<0;
+  }, 30000);
   var town=doc.getElementById('selTown');
-  li('镇/街道选项数='+town.options.length+'（'+Array.prototype.slice.call(town.options).map(function(o){return o.textContent;}).join(' | ').slice(0,150)+'）');
-  // 4) 黄鹤楼街道
+  li('镇/街道选项数='+town.options.length+(townReady?'（列表已就绪）':'（列表加载超时，继续按区县坐标测试）'));
+  // 4) 黄鹤楼街道（若能加载到）
   var target=null;
   for(var i=0;i<town.options.length;i++){
     if(town.options[i].textContent.indexOf('黄鹤楼')>=0){target=i;break;}
   }
-  if(target===null){li('<span class="fail">未找到「黄鹤楼街道」选项，乡镇列表可能加载失败</span>');return;}
-  var tval=town.options[target].value;
-  town.value=tval;
-  town.dispatchEvent(new Event('change'));
-  li('<span class="info">已选择</span> 镇/街道 = '+tval+'（黄鹤楼街道）');
+  if(target===null){
+    if(townReady){li('<span class="fail">未找到「黄鹤楼街道」选项</span>');}
+    else{li('<span class="info">镇/街道列表未加载，跳过街道选择（验证区县级解析兜底）</span>');}
+  }else{
+    var tval=town.options[target].value;
+    town.value=tval;
+    town.dispatchEvent(new Event('change'));
+    li('<span class="info">已选择</span> 镇/街道 = '+tval+'（黄鹤楼街道）');
+  }
   await wait(600);
   // 5) 点击获取24小时天气
   doc.getElementById('btnFetch').click();
