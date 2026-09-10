@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>坐标解析端到端测试</title>
+<style>
+body{font-family:system-ui,'Microsoft YaHei',sans-serif;padding:24px;background:#f8fafc;color:#1e293b;}
+h1{font-size:18px;margin:0 0 12px;}
+iframe{width:100%;height:480px;border:1px solid #cbd5e1;border-radius:8px;}
+ul{font-size:14px;line-height:1.8;padding-left:20px;}
+.pass{color:#16a34a;font-weight:700;}
+.fail{color:#dc2626;font-weight:700;}
+.info{color:#475569;}
+</style>
+</head>
+<body>
+<h1>坐标解析端到端测试（真实浏览器 · 公网页面）</h1>
+<iframe id="f" src="/heat-clothing-advice/" title="被测页面"></iframe>
+<ul id="log"></ul>
+<script>
+var log=document.getElementById('log');
+function li(html){var d=document.createElement('li');d.innerHTML=html;log.appendChild(d);}
+function wait(ms){return new Promise(function(r){setTimeout(r,ms);});}
+async function waitFor(fn,timeout){
+  var t0=Date.now();
+  while(Date.now()-t0<timeout){
+    try{if(fn()){return true;}}catch(e){}
+    await wait(300);
+  }
+  return false;
+}
+function setSel(doc,id,val,label){
+  var s=doc.getElementById(id);
+  s.value=val;
+  s.dispatchEvent(new Event('change'));
+  var txt=(s.options[s.selectedIndex]||{}).textContent||'';
+  li('<span class="info">已选择</span> '+label+' = '+val+'（'+txt+'）');
+}
+(async function(){
+  var f=document.getElementById('f');
+  var win=f.contentWindow, doc=f.contentDocument;
+  li('等待页面加载…');
+  var ok=await waitFor(function(){
+    return doc && doc.getElementById('selProv') && doc.getElementById('selProv').options.length>5;
+  }, 30000);
+  if(!ok){li('<span class="fail">页面加载超时</span>');return;}
+  li('<span class="pass">页面加载完成</span>，省份选项数='+doc.getElementById('selProv').options.length);
+  // 1) 湖北省
+  setSel(doc,'selProv','42','省/自治区/直辖市(湖北省)');
+  await wait(1000);
+  // 2) 武汉市
+  setSel(doc,'selCity','4201','市(武汉市)');
+  await wait(1000);
+  // 3) 武昌区
+  setSel(doc,'selDist','420106','区/县(武昌区)');
+  await wait(3000); // 等待乡镇街道列表从 jsDelivr 加载
+  var town=doc.getElementById('selTown');
+  li('镇/街道选项数='+town.options.length+'（'+Array.prototype.slice.call(town.options).map(function(o){return o.textContent;}).join(' | ').slice(0,150)+'）');
+  // 4) 黄鹤楼街道
+  var target=null;
+  for(var i=0;i<town.options.length;i++){
+    if(town.options[i].textContent.indexOf('黄鹤楼')>=0){target=i;break;}
+  }
+  if(target===null){li('<span class="fail">未找到「黄鹤楼街道」选项，乡镇列表可能加载失败</span>');return;}
+  var tval=town.options[target].value;
+  town.value=tval;
+  town.dispatchEvent(new Event('change'));
+  li('<span class="info">已选择</span> 镇/街道 = '+tval+'（黄鹤楼街道）');
+  await wait(600);
+  // 5) 点击获取24小时天气
+  doc.getElementById('btnFetch').click();
+  li('已点击「获取24小时天气」，等待结果…（最长 40 秒）');
+  var done=await waitFor(function(){
+    var st=doc.getElementById('wxStatus');
+    if(!st||!st.textContent){return false;}
+    var t=st.textContent;
+    return st.className.indexOf('err')>=0 || t.indexOf('成功')>=0 || t.indexOf('回退')>=0 || t.indexOf('解析')<0;
+  }, 45000);
+  await wait(2000);
+  var st=doc.getElementById('wxStatus');
+  var label=(win.WEATHER&&win.WEATHER.label)?win.WEATHER.label:'(无)';
+  var source=(win.WEATHER&&win.WEATHER.source)?win.WEATHER.source:'(无)';
+  var tw=(win.WEATHER&&win.WEATHER.times)?win.WEATHER.times.length:'(无)';
+  li('状态栏：<b>'+st.textContent+'</b>');
+  li('天气标签：'+label+' | 数据来源：'+source+' | 时点数：'+tw);
+  if(st.className.indexOf('err')>=0){
+    li('<span class="fail">【测试失败】地址解析报错</span>');
+  }else{
+    li('<span class="pass">【测试通过】坐标解析成功，天气数据已获取（'+tw+' 个时点）</span>');
+  }
+})();
+</script>
+</body>
+</html>
